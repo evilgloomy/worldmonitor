@@ -6,6 +6,11 @@ import { isDesktopRuntime } from '@/services/runtime';
 import { getSecretState } from '@/services/runtime-config';
 // boundary-ignore: isEntitled is a pure state check with no side effects
 import { isEntitled } from '@/services/entitlements';
+import {
+  DEFAULT_MAP_LAYERS as SHIBA_MAP_LAYERS,
+  DEFAULT_PANELS as SHIBA_PANELS,
+  MOBILE_DEFAULT_MAP_LAYERS as SHIBA_MOBILE_MAP_LAYERS,
+} from './variants/shiba';
 
 const _desktop = isDesktopRuntime();
 
@@ -1115,7 +1120,7 @@ const ENERGY_MOBILE_MAP_LAYERS: MapLayers = {
 // UNIFIED PANEL REGISTRY
 // ============================================
 
-type PanelVariant = 'full' | 'tech' | 'finance' | 'commodity' | 'energy' | 'happy';
+type PanelVariant = 'full' | 'tech' | 'finance' | 'commodity' | 'energy' | 'happy' | 'shiba';
 
 const VARIANT_PANEL_CONFIGS: Record<PanelVariant, Record<string, PanelConfig>> = {
   full: FULL_PANELS,
@@ -1124,6 +1129,7 @@ const VARIANT_PANEL_CONFIGS: Record<PanelVariant, Record<string, PanelConfig>> =
   commodity: COMMODITY_PANELS,
   energy: ENERGY_PANELS,
   happy: HAPPY_PANELS,
+  shiba: SHIBA_PANELS,
 };
 
 function getVariantPanelConfigs(variant: string): Record<string, PanelConfig> | undefined {
@@ -1139,6 +1145,7 @@ export const ALL_PANELS: Record<string, PanelConfig> = {
   ...ENERGY_PANELS,
   ...TECH_PANELS,
   ...FINANCE_PANELS,
+  ...SHIBA_PANELS,
   ...FULL_PANELS,
 };
 
@@ -1150,6 +1157,7 @@ export const VARIANT_DEFAULTS: Record<string, string[]> = {
   commodity: Object.keys(VARIANT_PANEL_CONFIGS.commodity),
   energy:    Object.keys(VARIANT_PANEL_CONFIGS.energy),
   happy:     Object.keys(VARIANT_PANEL_CONFIGS.happy),
+  shiba:     Object.keys(VARIANT_PANEL_CONFIGS.shiba),
 };
 
 /**
@@ -1425,6 +1433,8 @@ export const DEFAULT_MAP_LAYERS = SITE_VARIANT === 'happy'
         ? COMMODITY_MAP_LAYERS
         : SITE_VARIANT === 'energy'
           ? ENERGY_MAP_LAYERS
+          : SITE_VARIANT === 'shiba'
+            ? SHIBA_MAP_LAYERS
           : FULL_MAP_LAYERS;
 
 export const MOBILE_DEFAULT_MAP_LAYERS = SITE_VARIANT === 'happy'
@@ -1437,6 +1447,8 @@ export const MOBILE_DEFAULT_MAP_LAYERS = SITE_VARIANT === 'happy'
         ? COMMODITY_MOBILE_MAP_LAYERS
         : SITE_VARIANT === 'energy'
           ? ENERGY_MOBILE_MAP_LAYERS
+          : SITE_VARIANT === 'shiba'
+            ? SHIBA_MOBILE_MAP_LAYERS
           : FULL_MOBILE_MAP_LAYERS;
 
 /** Maps map-layer toggle keys to their data-freshness source IDs (single source of truth). */

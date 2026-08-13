@@ -12,6 +12,9 @@ FROM node:24-alpine@sha256:a0b9bf06e4e6193cf7a0f58816cc935ff8c2a908f81e6f1a95432
 
 WORKDIR /app
 
+ARG VITE_VARIANT=full
+ENV VITE_VARIANT=${VITE_VARIANT}
+
 # Install root dependencies (layer-cached until package.json changes)
 COPY package.json package-lock.json ./
 RUN npm ci --ignore-scripts
@@ -75,7 +78,9 @@ COPY --from=builder /app/dist /usr/share/nginx/html
 COPY docker/nginx.conf /etc/nginx/nginx.conf.template
 COPY docker/supervisord.conf /etc/supervisor/conf.d/worldmonitor.conf
 COPY docker/entrypoint.sh /app/entrypoint.sh
-RUN chmod +x /app/entrypoint.sh
+# Windows checkouts can materialize this shell script with CRLF endings. Strip
+# the carriage return in the Linux image so the shebang always resolves.
+RUN sed -i 's/\r$//' /app/entrypoint.sh && chmod +x /app/entrypoint.sh
 
 # Ensure writable dirs for non-root
 RUN chown -R appuser:appgroup /app /tmp/nginx-client-body /tmp/nginx-proxy \

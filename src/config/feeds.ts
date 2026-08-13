@@ -2,6 +2,7 @@ import type { Feed } from '@/types';
 import { SITE_VARIANT } from './variant';
 import { rssProxyUrl } from '@/utils';
 import { mergeCanonicalFeeds } from './feed-resolution';
+import { FEEDS as SHIBA_FEEDS } from './variants/shiba';
 import {
   getSourceProvenanceState,
   type SourceProvenanceState,
@@ -994,6 +995,8 @@ export const FEEDS = SITE_VARIANT === 'tech'
         ? COMMODITY_FEEDS
         : SITE_VARIANT === 'energy'
           ? ENERGY_FEEDS
+          : SITE_VARIANT === 'shiba'
+            ? SHIBA_FEEDS
           : FULL_FEEDS;
 
 // Canonical category→feeds map: the union of every variant's feed set.
@@ -1010,6 +1013,7 @@ export const CANONICAL_FEEDS: Record<string, Feed[]> = mergeCanonicalFeeds([
   COMMODITY_FEEDS,
   ENERGY_FEEDS,
   HAPPY_FEEDS,
+  SHIBA_FEEDS,
 ]);
 
 export const SOURCE_REGION_MAP: Record<string, { labelKey: string; feedKeys: string[] }> = {

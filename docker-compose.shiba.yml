@@ -1,0 +1,13 @@
+services:
+  worldmonitor:
+    build:
+      args:
+        VITE_VARIANT: shiba
+    environment:
+      WORLDMONITOR_VALID_KEYS: "${WORLDMONITOR_VALID_KEYS:?WORLDMONITOR_VALID_KEYS required}"
+    ports: !override
+      - "127.0.0.1:${WM_PORT:-4010}:8080"
+
+  redis-rest:
+    ports: !override
+      - "127.0.0.1:${WM_REDIS_REST_PORT:-8079}:80"

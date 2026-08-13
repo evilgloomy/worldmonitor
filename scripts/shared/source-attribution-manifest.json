@@ -14,6 +14,9 @@
           "path": "src/components/LiveNewsPanel.ts"
         },
         {
+          "path": "src/config/variant-meta.ts"
+        },
+        {
           "path": "src/services/runtime.ts"
         }
       ]
@@ -666,15 +669,10 @@
       "host": "api.groq.com",
       "provider": "api.groq.com",
       "kind": "structured",
-      "observed": true,
+      "observed": false,
       "license": "Excluded: first-party, control-plane, UI, or rendering transport",
       "attribution": "Excluded from the external-provider count: not an ingested upstream dataset.",
-      "status": "excluded",
-      "references": [
-        {
-          "path": "server/_shared/llm-health.ts"
-        }
-      ]
+      "status": "excluded"
     },
     {
       "host": "api.hyperliquid.xyz",
@@ -2589,9 +2587,6 @@
       "status": "excluded",
       "references": [
         {
-          "path": "src/app/panel-layout.ts"
-        },
-        {
           "path": "src/config/variant-meta.ts"
         }
       ]
@@ -3295,6 +3290,9 @@
           "path": "src/app/desktop-updater.ts"
         },
         {
+          "path": "src/config/variants/shiba.ts"
+        },
+        {
           "path": "src/services/analytics.ts"
         },
         {
@@ -3802,15 +3800,10 @@
       "host": "jmespath.org",
       "provider": "jmespath.org",
       "kind": "structured",
-      "observed": true,
+      "observed": false,
       "license": "Excluded: first-party, control-plane, UI, or rendering transport",
       "attribution": "Excluded from the external-provider count: not an ingested upstream dataset.",
-      "status": "excluded",
-      "references": [
-        {
-          "path": "api/mcp/constants.ts"
-        }
-      ]
+      "status": "excluded"
     },
     {
       "host": "kalshi.com",
@@ -4432,6 +4425,9 @@
         },
         {
           "path": "src/config/variants/finance.ts"
+        },
+        {
+          "path": "src/config/variants/shiba.ts"
         },
         {
           "path": "src/config/variants/tech.ts"
@@ -6970,15 +6966,10 @@
       "host": "workos.com",
       "provider": "workos.com",
       "kind": "structured",
-      "observed": true,
+      "observed": false,
       "license": "Excluded: first-party, control-plane, UI, or rendering transport",
       "attribution": "Excluded from the external-provider count: not an ingested upstream dataset.",
-      "status": "excluded",
-      "references": [
-        {
-          "path": "api/oauth-authorization-server.ts"
-        }
-      ]
+      "status": "excluded"
     },
     {
       "host": "worldmonitor.app",

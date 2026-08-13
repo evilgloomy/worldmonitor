@@ -161,6 +161,11 @@ describe('api/mcp.ts — per-tool output contract (envelope-shape, all registry 
         `tools/call response for ${name} missing content[0].text`,
       );
       const parsed = JSON.parse(body.result.content[0].text);
+      assert.deepEqual(
+        body.result.structuredContent,
+        parsed,
+        `${name}: structuredContent must match the declared outputSchema payload`,
+      );
 
       // Cache tools must always carry the envelope keys, regardless of the
       // schema's per-tool `data.properties`. Asserting these explicitly here

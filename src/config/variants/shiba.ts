@@ -1,9 +1,8 @@
-// Shiba Intelligence variant scaffold.
+// Shiba Intelligence self-host variant.
 //
-// IMPORTANT: this file is intentionally NOT registered in SITE_VARIANTS yet.
-// It is a safe feed/panel manifest for the Shiba Company OS prototype. Codex
-// should wire it into the variant registry, panel registry, localization and
-// tests only after the self-hosted World Monitor runtime is installed.
+// This variant is deliberately excluded from the public/desktop SITE_VARIANTS
+// catalog. It is selected at build time with VITE_VARIANT=shiba and is intended
+// for the private Shiba deployment, not a worldmonitor.app subdomain.
 
 import type { Feed, PanelConfig } from '@/types';
 import { rssProxyUrl } from '@/utils';
@@ -210,14 +209,14 @@ export const FEEDS: Record<string, Feed[]> = {
 };
 
 /**
- * Panel manifest. Most items are feed-backed panels. `shiba-brief`,
- * `shiba-watchlist-hits`, and `shiba-opportunities` are intentionally marked
- * as future custom panels: their data should be enriched by Company OS/Mina.
+ * Panel manifest. Every enabled item has an existing World Monitor component:
+ * the radar items are generic feed-backed panels and the remaining entries use
+ * proven shared panels. Executive synthesis and opportunity decisions stay in
+ * Company OS instead of being represented as non-functional dashboard panels.
  */
 export const DEFAULT_PANELS: Record<string, PanelConfig> = {
   map: { name: 'World Intelligence Map', enabled: true, priority: 1 },
   'live-news': { name: 'Breaking Intelligence', enabled: true, priority: 1 },
-  'shiba-brief': { name: 'Shiba Executive Brief', enabled: true, priority: 1 },
   watchlist: { name: 'Shiba Watchlist', enabled: true, priority: 1 },
   'ai-models': { name: 'AI Model Radar', enabled: true, priority: 1 },
   'agent-runtimes': { name: 'Agent Runtime Radar', enabled: true, priority: 1 },
@@ -230,8 +229,6 @@ export const DEFAULT_PANELS: Record<string, PanelConfig> = {
   'policy-grants': { name: 'Policy & Funding Opportunities', enabled: true, priority: 2 },
   'startup-funding': { name: 'Startup & Capital Radar', enabled: true, priority: 2 },
   'automotive-sim': { name: 'Automotive & Simulation', enabled: true, priority: 3 },
-  'shiba-watchlist-hits': { name: 'Watchlist Hits', enabled: true, priority: 1 },
-  'shiba-opportunities': { name: 'Shiba Opportunities', enabled: true, priority: 1 },
   security: { name: 'Cybersecurity', enabled: true, priority: 2 },
   policy: { name: 'AI Policy & Regulation', enabled: true, priority: 2 },
   markets: { name: 'Markets', enabled: true, priority: 2 },

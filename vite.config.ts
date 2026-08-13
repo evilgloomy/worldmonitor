@@ -277,7 +277,7 @@ function htmlVariantPlugin(activeMeta: VariantMeta, activeVariant: string, isDes
 
       // Desktop builds: replace favicon paths with variant-specific subdirectory.
       // Web builds use 'full' favicons in HTML; runtime JS swaps them per hostname.
-      if (activeVariant !== 'full') {
+      if (activeVariant !== 'full' && activeVariant !== 'shiba') {
         result = result
           .replace(/\/favico\/favicon/g, `/favico/${activeVariant}/favicon`)
           .replace(/\/favico\/apple-touch-icon/g, `/favico/${activeVariant}/apple-touch-icon`)

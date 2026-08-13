@@ -330,7 +330,10 @@ export async function dispatchToolsCall(
         hint,
       }) }] }, corsHeaders);
     }
-    return rpcOk(id, { content: [{ type: 'text', text }] }, corsHeaders);
+    return rpcOk(id, {
+      content: [{ type: 'text', text }],
+      structuredContent: JSON.parse(text) as unknown,
+    }, corsHeaders);
   } catch (err: unknown) {
     // `latency_ms` is time-in-tool (from tStart, captured after the quota
     // reservation) so the P95 error-path dashboard isn't skewed by reservation
