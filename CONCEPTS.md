@@ -26,7 +26,7 @@ The freshness clock a seeder declares over the *observation dates inside* the pa
 
 Two rules follow from what the contract reduces to. It reports a single newest timestamp, so a payload assembled from *several independently-failing sources* must derive one clock per source and report the **oldest** of them; reducing all their dates together takes the newest, and the still-living source then hides the dead one indefinitely — an alarm that can only fire when every source dies at once. And an undatable payload must report nothing rather than a default, because "we cannot date this" and "this is stale" warrant the same response, while a fabricated recent date warrants none.
 
-Sizing the budget belongs to the source's own publication calendar, measured rather than assumed: the widest gap the source routinely takes — a holiday cluster, a non-working period, a weekend either side — plus room for one missed run. A budget guessed generously enough to never false-alarm has usually also stopped detecting the freeze it exists for. See also: Seed-Owned Key, Activation Marker.
+Sizing the budget belongs to the source's own publication calendar, measured rather than assumed: the widest gap the source routinely takes — a holiday cluster, a non-working period, a weekend either side — plus room for one missed run. A budget guessed generously enough to never false-alarm has usually also stopped detecting the freeze it exists for. See also: Seed-Owned Key, Activation Marker, Content Clock.
 
 ### Activation Marker
 
@@ -114,6 +114,12 @@ Every enabled panel beyond the immediate tier's budget. A deferred panel's slot 
 
 The project's rule for any panel that joins the grid asynchronously, in either tier: a footprint-matched placeholder shell must occupy the panel's exact grid slot from the first synchronous layout pass, and the arriving panel replaces the shell in place rather than being inserted as a new grid item. The contract's invariant is that grid geometry never changes when async content arrives — violations register as layout shifts for every panel below the insertion point. Reserving the slot and starting the load early are independent decisions; conflating "loads immediately" with "needs no reservation" is the failure mode that produced the dashboard's dominant desktop layout-shift mechanism. See also: Immediate Tier, Deferred Tier, Shift Mover.
 
+### Late-Mount Window
+
+The interval between a Deferred Tier panel being constructed and its element entering the grid — routinely minutes on a phone, since the panel is built only as its shell nears the viewport while the boot data pass finished long before. Two things cross the window in opposite directions and both need somewhere to wait: data *pushed* to a panel that does not exist yet, and a render *emitted* by a panel whose element is not attached yet.
+
+The project's rule is that neither may be discarded. A push aimed at an absent panel is queued and replayed when the panel loads; a render emitted before attachment is deferred and flushed when the element joins the grid. Both failure modes read as defensive code and are silent — no error, no failed request, no telemetry — so they surface only as a panel that shows its initial placeholder for the whole session. The attachment check is the subtler of the two, because it is genuinely correct *after* attachment (a torn-down panel must not paint) and wrong *before* it; only checking ahead of the work distinguishes "never attached yet" from "detached again". See also: Deferred Tier, Deferred-Shell Contract, Viewport Prime.
+
 ### Viewport Prime
 
 The dashboard's demand-driven data pass: on boot, and again on every scroll and resize, it loads data for exactly the panels near the viewport, so a Deferred Tier panel receives its content only as the user approaches it. It re-runs constantly by design, which makes its safety contract the load-bearing part: the pass dedupes *concurrent* loads but does not remember *completed* ones, so every loader it can reach must be cheap to repeat — served from a real cache, or skipped outright when the panel already renders data. A loader that repeats expensively (an uncached network call, a teardown of already-rendered content) turns every scroll into user-visible churn.
@@ -137,6 +143,22 @@ The invariant that exactly one layer owns retry policy for any external provider
 ### Rate-Limit Outcome
 
 The typed value a provider-rate-limited operation returns *instead of throwing*, so every downstream surface renders a deliberate retry state — an HTTP 429 with a retry hint at the service boundary, a structured error code on the public API — rather than collapsing the limit into a generic failure. The outcome only exists after the owning retry layer has exhausted its bounded attempts; a raw rate-limit error escaping before that point is a defect, not an outcome. See also: Retry Ownership.
+
+## Error Telemetry & Suppression
+
+### Trampoline Frame
+
+A stack frame contributed by a monkeypatched global — most often a third-party script's `window.fetch` wrapper — that appears in a trace as though it were a caller but merely passes the call through. Trampoline frames make third-party failures look first-party, which is why suppression gates must classify them; the trap is that their *names* are minifier output, renamed at will across builds and eventually omitted entirely, so any gate that recognizes a trampoline by name shape is on a treadmill. Identity comes instead from build-stable structural facts: which first-party chunk the frame is attributed to, and whether the wrapping script's own frame is present in the same trace. A gate that admits trampoline frames from a chunk is safe only under an *enforced* invariant that the chunk's backing modules perform no network work of their own — enforced meaning a test fails when it stops being true, not a comment asserting it. See also: Vacuous Guard.
+
+## Timestamps & Hot-Document Writes
+
+### Content Clock
+
+A timestamp whose meaning is "the data beside it was confirmed against its source at this moment" — as distinct from a write stamp, which records only that a write happened. A clock becomes a content clock the moment any consumer compares it against another clock to decide which of two sources holds the fresher content; from then on, two rules bind every writer. Any write that changes the content the clock dates must stamp the clock in the same write, or the clock silently stops dating the content. And the clock may be throttled only for *no-change* writes: skipping a write when the content is identical cannot mis-order a freshness comparison, because whichever side then wins names the same content. The seeder-payload instance of the same idea is the Content-Age Contract — date the observations, never the run. See also: Content-Age Contract, Touch Mutation.
+
+### Touch Mutation
+
+A fire-and-forget mutation that stamps a credential's last-used time as a side effect of validating it. The stamp is telemetry — nothing may treat it as a Content Clock — which is what licenses aggressive suppression of the write. Its discipline is a debounce split across two lines that share one window constant: the *scheduling* site consults the stamp returned by the validation read and schedules nothing while the stamp is fresh, so no queue of touches can accumulate behind a debounce boundary and herd-write the same hot document when the window expires; the mutation re-checks staleness on execution as the second line, turning any straggler that races anyway into a read-only no-op — and in an optimistic-concurrency store, an execution that never writes cannot conflict. Splitting the window's value across the two lines is the failure mode: the halves drift and the herd returns. See also: Content Clock.
 
 ## Test & Guard Verification
 
@@ -448,6 +470,120 @@ alarm are the same check, the monitoring cannot be disabled without also
 breaking the sum. It applies only to sources that genuinely share a publication
 clock; series on different schedules would disagree constantly and the check
 would degrade into noise.
+
+## Resilience Scoring
+
+### Dimension
+
+One scored facet of a country's resilience — a single question about the
+country ("how exposed is its financial system?") answered as a number on a
+common scale, so facets that measure unlike things can be combined. A dimension
+is not a data source: it is a construct assembled from several inputs, and the
+same source can feed more than one.
+
+A dimension can be published dark — computed but deliberately excluded from what
+readers see — while its inputs and calibration are proven. Dark is a rollout
+state, not a defect state; a dimension that is dark is still expected to be
+correct.
+
+### Component Slot
+
+One weighted input to a dimension, together with the weight it carries. A slot
+resolves in one of three ways: to an observed reading, to an imputed value
+carrying reduced certainty, or not at all.
+
+The third case has a consequence worth stating, because it is the opposite of
+the intuition: an unresolved slot is not scored as zero and does not pull the
+dimension down. Its weight is redistributed across the slots that did resolve,
+so the dimension moves toward whatever survived. Withholding a slot is
+therefore never automatically the cautious choice — it raises the score
+whenever the withheld slot would have read below its siblings.
+
+### Coverage
+
+How much of a dimension's *designed* evidence actually resolved, expressed on
+the same scale for every dimension so sparsely-observed countries are
+distinguishable from well-observed ones.
+
+Coverage is measured against the weights the dimension was designed with, not
+against the weight that happened to resolve — which is what makes it meaningful
+at all. Because the score renormalises onto surviving slots and coverage does
+not, the two can move in opposite directions: a country losing an input can show
+a rising score and a falling coverage in the same response. When they disagree,
+coverage is the one describing the evidence.
+
+### Imputation Class
+
+The typed reason a slot carries an inferred value rather than an observed one.
+The distinction is the point: "we do not measure here", "the phenomenon is
+genuinely absent", "this indicator does not apply to this country", and "the
+source failed" are four different claims that would otherwise all appear as a
+missing number, and they justify very different scores. A country nobody
+surveys must not be scored like a country where the thing being measured
+verifiably does not happen.
+
+## Seed Bundle Orchestration
+
+### Bundle Wall Budget
+
+The total wall-clock time one bundle tick may occupy, chosen to sit below the
+container's hard kill so a member is shed cleanly instead of being killed
+mid-publish.
+
+The budget only shapes anything while it stays under that kill; at or above it
+the container dies first and the budget is decorative. Every member must fit the
+budget outright — a member whose worst case cannot fit is not under pressure, it
+can never run at all, which is a configuration error rather than load.
+
+### Section Worst Case
+
+The longest wall-clock a member can occupy: its own timeout plus the grace the
+runner allows between asking a child to stop and forcing it.
+
+Distinct from expected runtime, which is usually far smaller. Admission is
+decided on the worst case, so an over-declared timeout costs the bundle budget
+the member will never actually spend.
+
+### Admission Headroom
+
+Slack reserved above a member's worst case to cover the work the runner itself
+performs before it admits anything.
+
+Load-bearing rather than defensive: the runner's freshness checks run before the
+budget test, so the budget is already partly spent when the first member is
+considered. Deriving this from the runner's own per-check bound, rather than
+choosing a number, is what keeps the admission rule and the runtime rule from
+drifting apart — when they drift, the admission rule accepts a band of
+configurations the runtime rejects on every tick.
+
+### Section Deferral
+
+A due member skipped for lack of remaining budget on this tick, expected to run
+on a later one.
+
+Deferral is load-shedding, not failure — but it only pays for itself if the
+member eventually runs. A member deferred on every tick is a stall wearing
+deferral's clothing, and telling those two apart is the whole reason this
+vocabulary exists.
+
+### Graceful Skip
+
+A member that hit a transient upstream failure, extended its last-good data
+instead of publishing, and lost nothing.
+
+It must not crash the bundle: one rate-limited source firing a deploy-crash
+alert is the alert fatigue that makes the alarm worthless. Real staleness is
+caught by freshness monitoring on the published data, never by the tick's exit
+status.
+
+### Starved Tick
+
+A tick that completed no member while deferring due work — it published nothing
+and shed work at the same time.
+
+Indistinguishable from a healthy no-op by exit status alone, which is why it is
+named and reported explicitly. A tick where every member was merely fresh is a
+healthy no-op and must not be confused with it.
 
 ## Flagged ambiguities
 

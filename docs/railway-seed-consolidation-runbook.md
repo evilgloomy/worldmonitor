@@ -147,7 +147,7 @@ rejects every other host even if a workflow variable is misconfigured.
 | `ingestion-acceptance-production-watchdog` | Watchdog HMAC only; no Railway credential |
 | `ingestion-acceptance-production` | Mutation HMAC, `RAILWAY_RECONCILE_DEPLOY_TOKEN_V2`, and project ID |
 | `ingestion-acceptance-production-verification` | Verifier HMAC, `RAILWAY_RECONCILE_VIEWER_TOKEN`, project ID, and GitHub read evidence |
-| `ingestion-acceptance-production-breakglass` | Operator HMAC plus the same `RAILWAY_RECONCILE_VIEWER_TOKEN`; required reviewers gate the resolve job |
+| `ingestion-acceptance-production-breakglass` | Operator HMAC plus the same `RAILWAY_RECONCILE_VIEWER_TOKEN`; main-only secret boundary with no required reviewer |
 
 Both Railway tokens are distinct project tokens with identical capability; the
 names record intended use, not an enforced boundary. See the scope note below.
@@ -173,14 +173,14 @@ workflow contract tests, so treat any change to those guards as a change to a
 security boundary. Note also that `projectTokenCreate` rejects a CLI session
 with `Not Authorized`; both tokens must be created from the Railway dashboard.
 
-Breakglass approval is **one-person by deliberate choice.** The environment
-requires a reviewer, so `resolve` pauses until a human approves and GitHub
-records who did, but `prevent_self_review` is **off**: the operator who
-dispatches recovery may approve their own run. Turning it on with a single
-reviewer would deadlock the emergency path — the one person able to trigger
-recovery would be forbidden from approving it, exactly when it is needed. Real
-two-person control needs a second named reviewer added first; until then the
-`approver` workflow input stays an audit assertion, not a verified second party.
+Breakglass authorization is **one-person by deliberate choice.** The environment
+keeps its `main`-only branch policy and isolated secrets, but has no required
+reviewer. Requiring that same operator to review their own dispatch adds no
+independent authorization and sends one approval email for every recovery
+attempt. The `approver` workflow input records the delegated operator identity
+in the immutable controller audit and can equal the dispatch actor; it is not a
+verified second party. Real
+two-person control requires a second named operator and `prevent_self_review`.
 
 The protected resolver deliberately repeats the GitHub, convergence, and
 provider-inactivity reads after environment approval; the earlier proof is not
@@ -277,6 +277,13 @@ verified against that run's immutable manifest and exact incident head, while
 the protected resolution also records the separately revalidated current head.
 This separation keeps the convergence-acceptance route reachable after main
 moves, including when it must reset a full 64-run mutation lineage.
+
+The protected retry hold carries an immutable capability that is the only path
+that can replace a same-head Railway deployment in `FAILED`. Ordinary runs and
+watchdog-created recovery holds continue to report that failure without
+retrying it. A recovery still adopts any active same-head deployment, or a
+running same-head replacement newer than the failure, so the one-use controller
+hold cannot duplicate work that Railway already accepted.
 
 `retryEvidence` has exactly one of these forms. Its `evidenceId` must differ
 from the outer evidence ID:
@@ -375,10 +382,22 @@ incident note.
 default branch. Scheduled runs first require the latest `main` commit's `gate`
 status to be green; a missing, pending, or failed gate makes the workflow fail
 closed instead of producing a green skipped run. Manual runs execute directly.
-After the repository gate, the workflow checks live Railway watch paths, cron
-schedules, required routing variables, and service presence against
-`scripts/railway-services.json`, then runs the deploy-drift check, then checks
-public compact health. It fails on
+The workflow runs two independent jobs. Read the one that answers your question.
+
+- `monitor` is the gated job. After the repository gate, it checks live Railway
+  watch paths, cron schedules, required routing variables, and service presence
+  against `scripts/railway-services.json`, then checks public compact health.
+- `Railway deploy drift` is a separate job. It has no `needs:` and no gate
+  condition, so it runs in parallel with `monitor` and publishes its own
+  conclusion. A failed gate turns `monitor` red but leaves this job's verdict
+  intact (#6523).
+
+During a gate outage, read the `Railway deploy drift` job, not `monitor`. A red
+`monitor` alone says nothing about the fleet. Note that the run's overall
+conclusion and its badge stay red whenever `monitor` fails, so you must open the
+run and read the job conclusions to tell a clean fleet from a stranded one.
+
+`monitor` fails on
 every actionable problem, including `SEED_ERROR`, `STALE_SEED`,
 `STALE_CONTENT`, and degraded composed coverage. Statuses that explicitly end
 in `_ON_DEMAND` remain informational. It deliberately does not run on an
@@ -499,12 +518,15 @@ manual recovery.
 The observer combines run summaries from the preceding 24 hours with separate
 queries for every active target status, including runs that started before that
 window. It repeats the active sweep around the history read and defers if the
-inventory changes, then reads attempt jobs only for active, recent, durably
-referenced, or non-success terminal runs. It follows at most 10 pages per
-query, makes at most 250 GitHub API requests, and bounds each request to 10
-seconds. Durable barriers and dispatch holds remain authoritative beyond that
-window; exhausting any read budget defers recovery rather than dispatching on
-partial history.
+inventory changes. With a durable mutation barrier, it reads attempt jobs only
+for active and durably referenced runs because the barrier already forbids
+recovery. After strict terminal acceptance, `lastAccepted.acceptedAt` retires
+older failures while a failure that finishes after the watermark is still read.
+Before the first trusted acceptance, it keeps the full fail-closed non-success
+scan. It follows at most 10 pages per query, makes at most 250 GitHub API
+requests, and bounds each request to 10 seconds. Durable barriers and dispatch
+holds remain authoritative beyond that window; exhausting any read budget
+defers recovery rather than dispatching on partial history.
 
 Do **not** use `railway redeploy`: Railway documents it as rebuilding the most
 recent deployment with the same code, so it cannot pick up a newer fixed commit.
@@ -752,11 +774,12 @@ All new services share these settings:
 |---|---|
 | **Service name** | `seed-bundle-static-ref` |
 | **Start command** | `node scripts/seed-bundle-static-ref.mjs` |
-| **Cron schedule** | `0 3 * * 0` (weekly, Sunday 03:00 UTC) |
+| **Cron schedule** | `0 3 * * *` (daily at 03:00 UTC) |
 | **Watch paths** | `scripts/**`, `shared/**` |
 | **Replaces** | 4 services (including the retired defense-patents producer) |
 | **Net savings** | 3 slots |
-| **Members** | Submarine Cables (weekly), Defense Patents (weekly), Chokepoint Baselines (400d, runs rarely), Military Bases (30d, runs rarely) |
+| **Members** | Arms Suppliers (10d), Defense Industrial Base (10d), Submarine Cables (weekly), Defense Patents (weekly), Chokepoint Baselines (400d, runs rarely), Military Bases (30d, runs rarely), Mineral Production (60d, runs rarely) |
+| **Wall-time budget** | `maxBundleMs: 570_000` in `scripts/seed-bundle-static-ref.mjs`. The daily tick exists so this budget can defer lower-priority members rather than starve them; a member's own `timeoutMs` is a per-member cap inside that total, not an independent budget. |
 | **Required variable** | `USPTO_API_KEY=${{shared.USPTO_API_KEY}}` |
 
 Defense Patents is an intentional data-series migration, not a continuation of
@@ -766,6 +789,20 @@ empty for wire compatibility. The producer marks the discontinuity with
 `sourceVersion: uspto-odp-v1` and `schemaVersion: 2`; operational comparisons
 must not treat pre-migration grant dates and post-migration filing dates as one
 continuous metric.
+
+Defense Industrial Base writes `military:industrial-base:v1` from World Bank
+`MS.MIL.*` series and `military:arms-suppliers:v1` from SIPRI-derived five-year
+supplier shares. Both values have a 30-day TTL. Each source is eligible every
+10 days, and the daily service evaluates that interval before day 10, which
+keeps the canonical TTL above the three-refresh safety floor. The sources run
+as separate bounded processes under a 570-second bundle budget, so one failure
+cannot block the other source's publication. A SIPRI portal failure preserves
+last-good supplier rows with their original timestamps. A separate
+SIPRI-completion marker stays old after a partial pass, so the next daily tick
+retries the portal instead of treating the partial pass as complete.
+Strict health-probe registration is a staged follow-up after the first Railway
+run publishes both seed-meta keys; the follow-up must cite real Railway
+pre-seed evidence under the health-probe cutover contract.
 
 ### Bundle 4: seed-bundle-resilience
 
@@ -777,7 +814,9 @@ continuous metric.
 | **Watch paths** | `scripts/**`, `shared/**` |
 | **Replaces** | 2 services |
 | **Net savings** | 1 slot |
-| **Members** | Resilience Scores (6h), Resilience Static (annual window Oct 1-3, skips most runs) |
+| **Members** | Resilience Scores (6h), Resilience Static (annual window Oct 1-3, skips most runs), Food Stocks (monthly USDA PSD + FAOSTAT fill; needs `USDA_FAS_PSD_API_KEY`) |
+| **Wall budget** | 570 seconds, below Railway's 10-minute container kill. Section timeouts are 240s / 420s / 480s, so each fits the budget once the runner's 10s kill grace is added. Resilience Scores stays first in the array: it is the member that keeps `resilience:ranking:v27` and `resilience:intervals:v10:*` alive between cron fires, so it must be offered the budget before the heavier annual and monthly members. |
+| **Do not** | raise any section timeout above `maxBundleMs - 10_000`. A section whose timeout plus kill grace exceeds the budget is deferred on **every** tick while the bundle still exits 0 — #6556 ran this service dead for six hours behind a green badge. `tests/bundle-budget-admission.test.mjs` fails the PR, and `runBundle` refuses to start, but the arithmetic is worth knowing before you edit. |
 
 ### Bundle 5: seed-bundle-derived-signals
 
@@ -962,9 +1001,9 @@ Recovery is accepted only when:
 | **Watch paths** | See `scripts/railway-services.json` (exact runtime closure; run `node scripts/audit-railway-watch-paths.mjs`) |
 | **Replaces** | 5 services |
 | **Net savings** | 4 slots |
-| **Members** | Crypto Quotes (5min), Hyperliquid Flow (5min), Stablecoin Markets (10min), ETF Flows (15min), China Corporate Disclosures (30min), China Stock Connect (60min), Gulf Quotes (10min), Token Panels (30min), Gold ETF Flows (2h), Gold CB Reserves (daily), SEC CIK Map (daily), SEC 8-K Stream (30min) |
+| **Members** | Crypto Quotes (5min), Hyperliquid Flow (5min), Stablecoin Markets (10min), ETF Flows (15min), Market Correlation Series (15min), China Corporate Disclosures (30min), China Stock Connect (60min), Gulf Quotes (10min), Token Panels (30min), Gold ETF Flows (2h), Gold CB Reserves (daily), SEC CIK Map (daily), SEC 8-K Stream (30min) |
 | **Required env** | `PROXY_URL` (required independently by Gulf Quotes / ETF Flows and selected for an exchange only when its source-specific setting is absent). Proxy configuration precedence is `SSE_PROXY_URL` → `SZSE_PROXY_URL` → `PROXY_URL` for SSE and `SZSE_PROXY_URL` → `PROXY_URL` for SZSE; the process selects the first non-empty setting rather than attempting each URL sequentially. This is the deployment contract; production provisioning and live fallback acceptance require separate verification. |
-| **Note** | Crypto Quotes, Stablecoin Markets, ETF Flows, Gulf Quotes, and Token Panels back up ais-relay inline loops. Hyperliquid Flow, China Corporate Disclosures, China Stock Connect, Gold ETF Flows, Gold CB Reserves, SEC CIK Map, and SEC 8-K Stream are primary in this bundle. China Corporate Disclosures reads official metadata only: SSE uses direct then the selected proxy, while SZSE uses direct then distinct port attempts within the selected proxy. China Stock Connect reads aggregate exchange statistics over direct then the selected proxy only — it stops short of the edge hop, because a seeder fetches upstream data and the web tier serves it from Redis, and borrowing an edge function's egress for acquisition inverts that. It additionally caps every `www.szse.cn` request in a run under one shared 100s wall-clock budget, because its SZSE endpoints are date-keyed and the number of probes depends on how many sessions the exchange has published. Gulf Quotes uses Alpha Vantage (richer than relay's Yahoo-only). |
+| **Note** | Crypto Quotes, Stablecoin Markets, ETF Flows, Gulf Quotes, and Token Panels back up ais-relay inline loops. Hyperliquid Flow, Market Correlation Series, China Corporate Disclosures, China Stock Connect, Gold ETF Flows, Gold CB Reserves, SEC CIK Map, and SEC 8-K Stream are primary in this bundle. China Corporate Disclosures reads official metadata only: SSE uses direct then the selected proxy, while SZSE uses direct then distinct port attempts within the selected proxy. China Stock Connect reads aggregate exchange statistics over direct then the selected proxy only — it stops short of the edge hop, because a seeder fetches upstream data and the web tier serves it from Redis, and borrowing an edge function's egress for acquisition inverts that. It additionally caps every `www.szse.cn` request in a run under one shared 100s wall-clock budget, because its SZSE endpoints are date-keyed and the number of probes depends on how many sessions the exchange has published. Gulf Quotes uses Alpha Vantage (richer than relay's Yahoo-only). |
 
 ### Bundle 11: seed-bundle-relay-backup
 
@@ -1167,7 +1206,7 @@ Start with lowest-risk, highest-savings bundles.
 | Order | Bundle | Slots Freed | Risk | Cron Frequency |
 |---|---|---|---|---|
 | 1 | seed-bundle-ecb-eu | 3 | Low (daily, same API) | Daily |
-| 2 | seed-bundle-static-ref | 3 | Low (weekly, static data) | Weekly |
+| 2 | seed-bundle-static-ref | 3 | Low (daily tick, static data) | Daily |
 | 3 | seed-bundle-resilience | 1 | Low (6h, annual window) | 6h |
 | 4 | seed-bundle-portwatch | 3 | Medium (hourly, 4 members) | Hourly |
 | 5 | seed-bundle-climate | 4 | Medium (3h, 5 members) | 3h |

@@ -77,10 +77,40 @@ const PROVIDER_OVERRIDES = {
     attribution: 'Hyperliquid; link to the relevant market/API response.',
     status: 'terms-review',
   },
+  'apps.fas.usda.gov': {
+    provider: 'USDA FAS PSD',
+    license: 'U.S. government public-domain PSD Open Data',
+    attribution: 'USDA Foreign Agricultural Service, Production, Supply and Distribution (PSD).',
+    status: 'reviewed',
+  },
+  'api.fas.usda.gov': {
+    provider: 'USDA FAS PSD',
+    license: 'U.S. government public-domain PSD Open Data',
+    attribution: 'USDA Foreign Agricultural Service, Production, Supply and Distribution (PSD).',
+    status: 'reviewed',
+  },
+  'fenixservices.fao.org': {
+    provider: 'FAOSTAT',
+    license: 'FAOSTAT CC-BY; attribution to FAO required',
+    attribution: 'FAO. FAOSTAT. https://www.fao.org/faostat/',
+    status: 'reviewed',
+  },
   'publicreporting.cftc.gov': {
     provider: 'CFTC Commitments of Traders',
     license: 'U.S. government public data; endpoint terms apply',
     attribution: 'U.S. Commodity Futures Trading Commission (CFTC), Commitments of Traders.',
+    status: 'reviewed',
+  },
+  'www.sciencebase.gov': {
+    provider: 'USGS ScienceBase (Mineral Commodity Summaries)',
+    license: 'U.S. government public-domain mineral statistics (USGS MCS data release)',
+    attribution: 'U.S. Geological Survey Mineral Commodity Summaries; link to the ScienceBase data release (https://doi.org/10.5066/P1WKQ63T).',
+    status: 'reviewed',
+  },
+  'ogcapi.bgs.ac.uk': {
+    provider: 'British Geological Survey World Mineral Statistics',
+    license: 'BGS mineral statistics terms; attribution required; redistribution restricted',
+    attribution: 'British Geological Survey (BGS) World Mineral Production; credit BGS and link to https://www.bgs.ac.uk/mineralsuk/statistics/world-mineral-statistics/.',
     status: 'reviewed',
   },
   'feeds.finra.org': {
