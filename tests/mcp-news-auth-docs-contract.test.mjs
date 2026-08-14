@@ -143,9 +143,11 @@ describe('MCP news/auth public contract', () => {
     const withoutContext = await captureRpcFetches('get_world_brief', {});
     const requestShape = ({ calls }) => calls.map((call) => [call.url, String(call.init.body ?? '')]);
     const resultWithoutTimestamp = ({ result }) => {
-      const { generatedAt, ...stable } = result;
+      const { generatedAt, freshness, ...stable } = result;
       assert.match(generatedAt, /^\d{4}-\d{2}-\d{2}T/);
-      return stable;
+      assert.equal(freshness.status, 'fresh');
+      assert.equal(freshness.generatedAt, generatedAt);
+      return { ...stable, freshness: { status: freshness.status } };
     };
 
     assert.deepEqual(resultWithoutTimestamp(withContext), resultWithoutTimestamp(withoutContext));
@@ -163,6 +165,10 @@ describe('MCP news/auth public contract', () => {
       publishedAt: '2026-06-07T00:00:00.000Z',
     }]);
     assert.equal(worldResult.summary, 'Seeded grounded world brief.');
+    assert.equal(worldResult.status, 'ok');
+    assert.deepEqual(worldResult.warnings, []);
+    assert.equal(worldResult.freshness.status, 'fresh');
+    assert.deepEqual(worldResult.sections.sources, worldResult.sources);
     assert.equal(worldResult.sources.some((source) => source.url.startsWith('javascript:')), false);
 
     assert.deepEqual(countryResult.sources, worldResult.sources);
@@ -173,7 +179,7 @@ describe('MCP news/auth public contract', () => {
     assert.doesNotMatch(context, /russia-house/);
   });
 
-  it('fails closed when the shared dashboard payload has no accepted brief', async () => {
+  it('returns a structured degraded result when the shared dashboard payload is incomplete', async () => {
     const rejectedPayloads = [
       { worldBrief: '', status: 'degraded' },
       { worldBrief: 'Degraded but non-empty', status: 'degraded' },
@@ -193,12 +199,32 @@ describe('MCP news/auth public contract', () => {
       },
     ];
     for (const insights of rejectedPayloads) {
-      await assert.rejects(
-        () => captureRpcFetches('get_world_brief', {}, { insights }),
-        (error) => error?.name === 'McpSourceUnavailableError'
-          && /world brief unavailable/i.test(error.message),
-      );
+      const { result } = await captureRpcFetches('get_world_brief', {}, { insights });
+      assert.equal(result.status, 'degraded');
+      assert.ok(result.warnings.length > 0);
+      assert.equal(typeof result.sections.summary, 'string');
+      assert.ok(Array.isArray(result.sections.headlines));
+      assert.ok(Array.isArray(result.sections.sources));
     }
+  });
+
+  it('preserves successful sections and labels freshness when one section is unavailable', async () => {
+    const { result } = await captureRpcFetches('get_world_brief', {}, {
+      insights: {
+        worldBrief: 'Useful summary survives a citation outage.',
+        worldBriefSources: [],
+      },
+    });
+
+    assert.equal(result.status, 'degraded');
+    assert.equal(result.summary, 'Useful summary survives a citation outage.');
+    assert.deepEqual(result.headlines, ['United States headline used for MCP grounding']);
+    assert.deepEqual(result.sources, []);
+    assert.deepEqual(result.sections.headlines, result.headlines);
+    assert.ok(result.warnings.some((warning) => (
+      warning.component === 'sources' && warning.reason === 'missing-sources'
+    )));
+    assert.equal(result.freshness.status, 'fresh');
   });
 
   it('preserves producer citation indexes when one source has no usable URL', async () => {
@@ -246,6 +272,9 @@ describe('MCP news/auth public contract', () => {
     }
     assert.match(rpcTool('get_world_brief').description, /seeded|precomputed|dashboard/i);
     assert.doesNotMatch(rpcTool('get_world_brief').description, /live-fetches.*LLM/i);
+    assert.deepEqual(rpcTool('get_world_brief').outputSchema.properties.status.enum, ['ok', 'degraded']);
+    assert.equal(rpcTool('get_world_brief').outputSchema.properties.warnings.type, 'array');
+    assert.equal(rpcTool('get_world_brief').outputSchema.properties.sections.type, 'object');
   });
 
   it('MCP-facing docs and fixture helpers do not teach stale API-key prefixes', () => {

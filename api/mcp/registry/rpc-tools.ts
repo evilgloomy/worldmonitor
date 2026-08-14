@@ -15,9 +15,9 @@ import {
   assertMcpToolFetchOk,
   BothSourcesFailedError,
   buildMcpDownstreamHeaders,
+  ToolFetchError,
 } from '../downstream';
 import { evaluateFreshness } from '../freshness';
-import { McpSourceUnavailableError } from '../source-unavailable';
 import {
   collectInsightSources,
   insightsSnapshotRejection,
@@ -211,29 +211,75 @@ type SeededWorldBriefPayload = {
   topStories?: unknown;
 };
 
-// Rejections carry a bounded reason so the "Seeded world brief unavailable"
-// alarm names WHICH gate fired (WORLDMONITOR-YJ) — a stale producer and a
-// schema regression need opposite responses. Bounded values only: the reason
-// lands in Sentry/log messages, never in the client-facing RPC error.
-type SeededWorldBriefProjection =
-  | { value: Record<string, unknown> }
-  | { reason: string };
+// Degraded responses carry bounded component/reason pairs: a stale producer
+// and a schema regression need opposite responses, but neither should discard
+// unrelated successful sections or expose raw upstream details.
+type WorldBriefWarning = {
+  component: 'news:insights:v1' | 'summary' | 'headlines' | 'sources';
+  reason: string;
+};
+
+type WorldBriefFreshness = {
+  status: 'fresh' | 'stale' | 'unknown';
+  generatedAt: string;
+};
+
+type SeededWorldBriefProjection = {
+  status: 'ok' | 'degraded';
+  brief: string;
+  summary: string;
+  headlines: string[];
+  topStories: McpWorldBriefStory[];
+  provider: string;
+  model: string;
+  generatedAt: string;
+  sources: McpBriefSource[];
+  sections: {
+    summary: string;
+    headlines: string[];
+    topStories: McpWorldBriefStory[];
+    sources: McpBriefSource[];
+  };
+  freshness: WorldBriefFreshness;
+  warnings: WorldBriefWarning[];
+};
+
+function unavailableWorldBrief(reason: string): SeededWorldBriefProjection {
+  return {
+    status: 'degraded',
+    brief: '',
+    summary: '',
+    headlines: [],
+    topStories: [],
+    provider: '',
+    model: '',
+    generatedAt: '',
+    sources: [],
+    sections: { summary: '', headlines: [], topStories: [], sources: [] },
+    freshness: { status: 'unknown', generatedAt: '' },
+    warnings: [{ component: 'news:insights:v1', reason }],
+  };
+}
 
 function projectSeededWorldBrief(raw: unknown): SeededWorldBriefProjection {
-  const snapshotRejection = insightsSnapshotRejection(raw);
-  if (snapshotRejection !== null) return { reason: snapshotRejection };
-  if (!isRecord(raw)) return { reason: 'malformed-snapshot' };
+  if (!isRecord(raw)) return unavailableWorldBrief('missing-snapshot');
   const payload = raw as SeededWorldBriefPayload;
   const brief = typeof payload.worldBrief === 'string' ? payload.worldBrief.trim() : '';
   const generatedAt = typeof payload.generatedAt === 'string' ? payload.generatedAt : '';
   const topStories = Array.isArray(payload.topStories) ? payload.topStories : [];
+  const warnings: WorldBriefWarning[] = [];
 
-  // Reuse the dashboard's freshness/shape acceptance, then apply MCP-specific
-  // output requirements. Never substitute an on-demand LLM result when the
-  // seeded producer has degraded: an empty or stale snapshot is safer than
-  // returning an ungated brief.
-  if (!brief) return { reason: 'empty-brief' };
-  if (payload.status !== 'ok') return { reason: 'status-not-ok' };
+  // Keep the dashboard's acceptance signal, but turn optional snapshot
+  // quality failures into explicit degradation. This preserves any usable
+  // sections without synthesizing or request-time regenerating missing data.
+  const snapshotRejection = insightsSnapshotRejection(raw);
+  if (snapshotRejection !== null) {
+    warnings.push({ component: 'news:insights:v1', reason: snapshotRejection });
+  }
+  if (payload.status !== 'ok') {
+    warnings.push({ component: 'news:insights:v1', reason: 'status-not-ok' });
+  }
+  if (!brief) warnings.push({ component: 'summary', reason: 'empty-brief' });
 
   const headlines: string[] = [];
   const storyCorroboration: McpWorldBriefStory[] = [];
@@ -247,25 +293,35 @@ function projectSeededWorldBrief(raw: unknown): SeededWorldBriefProjection {
     storyCorroboration.push(projectStoryCorroboration(headline, story));
     if (headlines.length >= 12) break;
   }
-  if (headlines.length === 0) return { reason: 'no-headlines' };
+  if (headlines.length === 0) warnings.push({ component: 'headlines', reason: 'no-headlines' });
 
   // The producer's sources share the brief's citation index space. Preserve
   // every record in order, including an empty URL fallback, so a malformed
   // source cannot make later [n] citations point at the wrong article.
   const sourceItems = Array.isArray(payload.worldBriefSources) ? payload.worldBriefSources : null;
-  if (!sourceItems || sourceItems.length === 0 || sourceItems.length > 12) return { reason: 'missing-sources' };
-  const sources = sourceItems.map((item, index) => normalizeInsightSource(item, {
-    fallback: topStories[index],
-    urlOrder: 'url-first',
-    allowEmptyUrl: true,
-  }));
-  if (sources.some((source) => source === null) || !sources.some((source) => source?.url)) {
-    return { reason: 'malformed-sources' };
+  let sources: McpBriefSource[] = [];
+  if (!sourceItems || sourceItems.length === 0 || sourceItems.length > 12) {
+    warnings.push({ component: 'sources', reason: 'missing-sources' });
+  } else {
+    const projectedSources = sourceItems.map((item, index) => normalizeInsightSource(item, {
+      fallback: topStories[index],
+      urlOrder: 'url-first',
+      allowEmptyUrl: true,
+    }));
+    if (projectedSources.some((source) => source === null) || !projectedSources.some((source) => source?.url)) {
+      warnings.push({ component: 'sources', reason: 'malformed-sources' });
+    } else {
+      sources = projectedSources as McpBriefSource[];
+    }
   }
   const provider = typeof payload.briefProvider === 'string' ? payload.briefProvider : '';
   const model = typeof payload.briefModel === 'string' ? payload.briefModel : '';
+  const freshnessStatus: WorldBriefFreshness['status'] = snapshotRejection === 'stale-snapshot'
+    ? 'stale'
+    : snapshotRejection === null ? 'fresh' : 'unknown';
 
-  return { value: {
+  return {
+    status: warnings.length === 0 ? 'ok' : 'degraded',
     brief,
     summary: brief,
     headlines,
@@ -273,8 +329,11 @@ function projectSeededWorldBrief(raw: unknown): SeededWorldBriefProjection {
     provider,
     model,
     generatedAt,
-    sources: sources as McpBriefSource[],
-  } };
+    sources,
+    sections: { summary: brief, headlines, topStories: storyCorroboration, sources },
+    freshness: { status: freshnessStatus, generatedAt },
+    warnings,
+  };
 }
 
 function countryBriefSearchTerms(countryCode: string): string[] {
@@ -906,6 +965,7 @@ export const RPC_TOOLS: ToolDef[] = [
     outputSchema: {
       type: 'object',
       properties: {
+        status: { type: 'string', enum: ['ok', 'degraded'], description: 'Overall result status. Degraded responses retain every usable section and name unavailable sections in warnings.' },
         brief: { type: 'string', description: 'Citation-grounded brief from the dashboard insights snapshot.' },
         summary: { type: 'string', description: 'Alternate naming used by some upstream variants.' },
         headlines: { type: 'array', items: { type: 'string' } },
@@ -945,6 +1005,34 @@ export const RPC_TOOLS: ToolDef[] = [
             },
           },
         },
+        sections: {
+          type: 'object',
+          description: 'Usable brief components, repeated as a structured surface for degraded-result consumers.',
+          properties: {
+            summary: { type: 'string' },
+            headlines: { type: 'array', items: { type: 'string' } },
+            topStories: { type: 'array', items: { type: 'object' } },
+            sources: { type: 'array', items: { type: 'object' } },
+          },
+        },
+        freshness: {
+          type: 'object',
+          properties: {
+            status: { type: 'string', enum: ['fresh', 'stale', 'unknown'] },
+            generatedAt: { type: 'string' },
+          },
+        },
+        warnings: {
+          type: 'array',
+          description: 'Bounded component/reason pairs for optional data that could not be served.',
+          items: {
+            type: 'object',
+            properties: {
+              component: { type: 'string' },
+              reason: { type: 'string' },
+            },
+          },
+        },
       },
     },
     annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
@@ -960,36 +1048,45 @@ export const RPC_TOOLS: ToolDef[] = [
       // gateway-backed path to retain entitlement and replay protection.
       const insightsUrl = `${base}/api/infrastructure/v1/get-bootstrap-data?keys=insights`;
       const insightsAuth = await buildAuthHeaders(context, 'GET', insightsUrl, null);
-      const insightsRes = await fetch(insightsUrl, {
-        headers: { ...insightsAuth, 'User-Agent': UA },
-        signal: AbortSignal.timeout(6_000),
-      });
-      await assertMcpToolFetchOk(insightsRes, {
-        operation: 'bootstrap-insights',
-        tool: 'get_world_brief',
-        auth: context,
-        execution,
-      });
+      let insightsRes: Response;
+      try {
+        insightsRes = await fetch(insightsUrl, {
+          headers: buildMcpDownstreamHeaders(base, execution, { ...insightsAuth, 'User-Agent': UA }),
+          signal: AbortSignal.timeout(6_000),
+        });
+        await assertMcpToolFetchOk(insightsRes, {
+          operation: 'bootstrap-insights',
+          tool: 'get_world_brief',
+          auth: context,
+          execution,
+        });
+      } catch (error) {
+        if (error instanceof BillingDenialError) throw error;
+        if (error instanceof ToolFetchError && [401, 403, 405].includes(error.status)) throw error;
+        const reason = error instanceof ToolFetchError
+          ? (error.status === 429 ? 'rate-limited' : 'upstream-unavailable')
+          : error instanceof Error && (error.name === 'AbortError' || error.name === 'TimeoutError')
+            ? 'timeout'
+            : 'fetch-failed';
+        return unavailableWorldBrief(reason);
+      }
       type BootstrapPayload = { data?: { insights?: unknown }; missing?: string[] };
-      const bootstrap = await insightsRes.json() as BootstrapPayload;
+      let bootstrap: BootstrapPayload;
+      try {
+        bootstrap = await insightsRes.json() as BootstrapPayload;
+      } catch {
+        return unavailableWorldBrief('invalid-response');
+      }
       const rawInsights = bootstrap.data?.insights;
       let insights: unknown = rawInsights;
       if (typeof rawInsights === 'string') {
         try {
           insights = JSON.parse(rawInsights);
         } catch {
-          insights = null;
+          return unavailableWorldBrief('malformed-snapshot');
         }
       }
-      const result = projectSeededWorldBrief(insights);
-      if ('reason' in result) {
-        throw new McpSourceUnavailableError(
-          `Seeded world brief unavailable (${result.reason})`,
-          ['news:insights:v1'],
-          [],
-        );
-      }
-      return result.value;
+      return projectSeededWorldBrief(insights);
     },
     _apiPaths: ['GET /api/infrastructure/v1/get-bootstrap-data'],
   },
